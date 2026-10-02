@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>1.1.0.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <Author>Latency Bryer</Author>
+    <Name>Bryer's Hideout Control</Name>
+    <Punchline>In-game control panel for Bryer's Hideout.</Punchline>
+    <Description>Authenticated in-game Staff control panel for Bryer's Hideout.</Description>
+    <Tags>bryer;hideout;venue;staff;admin</Tags>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+</Project>

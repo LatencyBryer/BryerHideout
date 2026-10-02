@@ -1,0 +1,50 @@
+name: Build Dalamud Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BryersHideoutPlugin.csproj --locked-mode
+
+      - name: Build
+        run: dotnet build BryersHideoutPlugin.csproj -c Release --no-restore
+
+      - name: Package plugin
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'bin\x64\Release'
+          if (-not (Test-Path $output)) {
+            $output = Join-Path $PWD 'bin\Release'
+          }
+          if (-not (Test-Path $output)) {
+            throw 'Dalamud build output folder was not found.'
+          }
+          $staging = Join-Path $PWD 'artifacts\BryersHideoutPlugin'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Get-ChildItem $output -File | Where-Object {
+            $_.Extension -in @('.dll', '.json') -and $_.Name -notlike '*.pdb'
+          } | Copy-Item -Destination $staging
+          Compress-Archive -Path "$staging\*" -DestinationPath 'BryersHideoutPlugin.zip' -Force
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" BryersHideoutPlugin.zip --title "${{ github.ref_name }}" --generate-notes
