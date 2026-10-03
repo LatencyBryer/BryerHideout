@@ -16,9 +16,7 @@
     "DownloadCount": 0,
     "LastUpdate": 0,
     "LoadPriority": 0,
-    "DownloadLinkInstall": "https://github.com/YOUR_GITHUB_USER/YOUR_REPOSITORY/releases/download/v1.1.0.0/BryersHideoutPlugin.zip",
-    "DownloadLinkUpdate": "https://github.com/YOUR_GITHUB_USER/YOUR_REPOSITORY/releases/download/v1.1.0.0/BryersHideoutPlugin.zip",
-    "DownloadLinkTesting": "https://github.com/YOUR_GITHUB_USER/YOUR_REPOSITORY/releases/download/v1.1.0.0/BryersHideoutPlugin.zip",
+    "DownloadLinkInstall": "https://github.com/LatencyBryer/BryerHideout/releases/latest/download/hideout.zip",
     "Tags": ["bryer", "hideout", "venue", "staff"]
   }
 ]
