@@ -197,6 +197,7 @@ public sealed class MainWindow : Window, IDisposable
             if (ImGui.Button("+ Add Player")) ImGui.OpenPopup("Add Player##popup");
             ImGui.SameLine();
             if (ImGui.Button("+ Add Target")) _ = AddCurrentTargetAsync();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automaticaly register current target as a new user.");
             ImGui.SameLine();
         }
         if (plugin.Api.Can("players.view"))
@@ -246,17 +247,15 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawStatusLine()
     {
-        ImGui.TextColored(plugin.Api.IsConnected ? Green : Red, plugin.Api.IsConnected ? "API ONLINE" : "API OFFLINE");
+        var connected = plugin.Api.IsConnected && plugin.Realtime.IsConnected;
+        ImGui.TextColored(connected ? Green : Red, connected ? "Connected" : "Disconnected");
         ImGui.SameLine();
-        ImGui.TextColored(plugin.Realtime.IsConnected ? Green : Muted, plugin.Realtime.IsConnected ? "• REALTIME ONLINE" : "• REALTIME OFFLINE");
-        ImGui.SameLine();
-        ImGui.TextColored(Muted, $"• {plugin.Api.StatusMessage}");
+        if (ImGui.Button("Call Support"))
+            Dalamud.Utility.Util.OpenLink("https://discord.com/users/896449611168874507");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Need immediate help? Click here.");
 
         if (!string.IsNullOrWhiteSpace(notice))
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(Green, $"• {notice}");
-        }
+            ImGui.TextColored(Green, notice);
         if (!string.IsNullOrWhiteSpace(error)) ImGui.TextWrapped(error);
     }
 
@@ -428,6 +427,7 @@ public sealed class MainWindow : Window, IDisposable
             if (ImGui.SmallButton("Copy##code")) ImGui.SetClipboardText(membership!.AccessCode);
             ImGui.SameLine();
             if (ImGui.SmallButton("Existing Code##code")) _ = SendExistingCodeAsync(player, membership, active);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hit this to send a different tell to the target if it's not a New user.");
         }
 
         ImGui.Spacing();
@@ -477,7 +477,7 @@ public sealed class MainWindow : Window, IDisposable
                 if (ImGui.Button("Apply")) _ = AdjustBalanceAsync(player);
                 ImGui.EndTable();
             }
-            ImGui.TextWrapped("Positive adds site Gil; negative removes/claims site Gil.");
+            ImGui.TextWrapped("Positive values adds Gil, Negative values removes Gil.");
         }
 
         ImGui.Spacing();
@@ -557,7 +557,7 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.TextColored(plugin.TradeMonitor.IsTradeOpen ? Gold : Muted, plugin.TradeMonitor.IsTradeOpen ? "Trade window detected" : "Waiting for a trade");
         if (tradeNarrow) ImGui.NewLine(); else ImGui.SameLine();
         ImGui.TextColored(Muted, $"Current wallet: {Format(plugin.TradeMonitor.ReadGil())} Gil");
-        ImGui.TextWrapped("When enabled, the plugin snapshots your Gil when the native Trade window opens/closes and records only completed trades with a Gil delta. It does not alter Venue Profit.");
+        ImGui.TextWrapped("Saves a history of every Gil trade you receive/send.");
         if (ImGui.Button("Clear Trade History")) plugin.TradeMonitor.ClearHistory();
         ImGui.SameLine();
         if (ImGui.Button("Copy CSV")) ImGui.SetClipboardText(BuildTradeCsv(plugin.Configuration.TradeHistory));
@@ -594,10 +594,8 @@ public sealed class MainWindow : Window, IDisposable
             plugin.Configuration.Save();
             plugin.Announcements.ResetLiveCursor();
         }
-        ImGui.TextWrapped("Only rewards marked Global Announcement appear here, after the winner's website roulette finishes and reveals the reward. The plugin listens through its existing realtime connection (no 15-second feed polling). After an announcement, all other events in the next 10 minutes are ignored, not queued. Plugin must be online and your character logged in.");
-        ImGui.TextWrapped("Placeholders: {playername}, {prize}, {coffer}, {amount}. One randomly chosen message is used for each eligible event.");
+        ImGui.TextWrapped("Rare/Big wins will automaticaly be /shout in chat using one of the messages you create below. Use {playername} for the player nickname, {prize} for the reward name. Only one shout every 10 minutes will be sent to avoid spam.");
         ImGui.Spacing();
-        ImGui.TextColored(Gold, "Announcement messages");
 
         for (var i = 0; i < announcementDrafts.Count; i++)
         {
@@ -659,9 +657,7 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawShouts()
     {
-        ImGui.TextColored(Gold, "Manual /shout messages");
-        ImGui.TextWrapped("Save your messages below, then type /hshout in the game chat to send one randomly as /shout. Every saved message is used once before the list repeats; the rotation also survives plugin reloads. These messages are independent of automatic Announcements and their cooldown.");
-        ImGui.TextWrapped("Item links: write {id:46600} anywhere in a message to insert a clickable in-game item link for that item ID. Multiple item placeholders in one message are supported.");
+        ImGui.TextWrapped("Put your shout messages below one by one, the plugin will choose one of them randomly to shout when you type the command /hshout. Use {id:XXXX} to link a item in the message, example: {id:46906}. Hit the button \"Save Shouts\" to save any changes/additions");
         ImGui.Spacing();
 
         for (var i = 0; i < shoutDrafts.Count; i++)
@@ -698,22 +694,12 @@ public sealed class MainWindow : Window, IDisposable
             error = "";
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.TextColored(Muted, plugin.Shouts.Status);
-        var configuredCount = plugin.Configuration.ShoutTemplates.Count;
-        if (configuredCount > 0)
-        {
-            var remaining = plugin.Configuration.ShoutRemainingTemplates.Count;
-            ImGui.TextColored(Green, $"{remaining} of {configuredCount} message(s) left in this rotation; the deck restarts after all have been sent.");
-        }
-        ImGui.TextColored(Muted, "Message edits are only applied after Save Shouts; editing the list starts a fresh rotation.");
     }
 
     private void DrawSettings()
     {
         ImGui.TextColored(Gold, "Tell Message");
-        ImGui.TextWrapped("Available placeholders: {code}, {player}, {venue}. The Tell is sent to your current in-game target, and the plugin refuses to send if the target name does not match the selected site Player.");
+        ImGui.TextWrapped("Use {code} for player's code, {player} for target/player name and {venue} for current venue name. Hit the button \"Save Tell Template\" to save the changes.");
         ImGui.InputTextMultiline("##tell-template", ref tellTemplateDraft, 600, new Vector2(0, 90 * ImGuiHelpers.GlobalScale));
         if (ImGui.Button("Save Tell Template"))
         {
@@ -730,21 +716,6 @@ public sealed class MainWindow : Window, IDisposable
             plugin.Configuration.OpenWindowOnLoad = openOnLoad;
             plugin.Configuration.Save();
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.TextColored(Gold, "Staff Session");
-        var identity = plugin.Api.Identity;
-        ImGui.TextWrapped($"Signed in: {identity?.DisplayName ?? "Staff"} · {identity?.Email ?? "—"}");
-        ImGui.TextWrapped($"Role: {(identity?.IsMaster == true ? "Master Admin" : string.IsNullOrWhiteSpace(identity?.RoleName) ? "Staff" : identity!.RoleName)}");
-        if (identity?.IsMaster != true && !string.IsNullOrWhiteSpace(identity?.RoleProfileName))
-            ImGui.TextWrapped($"Venue scope: {identity.RoleProfileName}");
-        ImGui.TextWrapped($"Website: {AdminApiClient.SiteBaseUrl}");
-        ImGui.TextWrapped($"Realtime: {RealtimeClient.RealtimeUrl}");
-        ImGui.TextWrapped("Authentication uses the same server-side Staff session and permissions as the website. The password is never written to the Dalamud plugin configuration.");
-        if (ImGui.Button("Test / Refresh API")) _ = plugin.Api.RefreshAsync(true);
-        ImGui.SameLine();
-        if (ImGui.Button("Logout##settings")) _ = LogoutAsync();
     }
 
     private void DrawAddPlayerPopup(AdminSnapshot snapshot)
