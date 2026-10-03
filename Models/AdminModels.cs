@@ -27,6 +27,17 @@ public sealed record ProfileSalesFinancialModel(string ProfileId, long CardPackT
 public sealed record ProfileFinancialOffsetModel(string ProfileId, long CashflowProfitOffset, long CardPackTipsOffset, long VenueOnlySalesOffset, long VenueOnlyCardPackSalesOffset, long JackpotRaisedOffset);
 public sealed record ProfileJackpotTotalModel(string ProfileId, long SlotsRaised, long BlackPrismRaised);
 public sealed record ProfileMinigameProfitPeriodModel(string ProfileId, long MinigameLoss, long NonVenueProfitContribution, long VenueProfitContribution);
+public sealed record StaffDashboardSummaryModel(
+    long Players,
+    long ActivePlayers,
+    long Lootboxes,
+    long Rewards,
+    long Cards,
+    long JackpotRaised,
+    long VenueCardPackTips,
+    long NonVenueCardPackTips,
+    long VenueProfit,
+    long NonVenueProfit);
 
 public sealed record PrizeWinModel(
     string Id,
@@ -140,6 +151,7 @@ public sealed class AdminSnapshot
     public IReadOnlyList<ProfileMinigameProfitPeriodModel> ProfileMinigameProfitPeriods { get; set; } = Array.Empty<ProfileMinigameProfitPeriodModel>();
     public long SlotsJackpot { get; set; } = 5_000_000;
     public long BlackPrismJackpot { get; set; } = 5_000_000;
+    public StaffDashboardSummaryModel? DashboardSummary { get; init; }
 
     public IReadOnlyList<MembershipModel> MembershipsForProfile(string profileId) =>
         Memberships.Where(x => string.Equals(x.ProfileId, profileId, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -147,7 +159,12 @@ public sealed class AdminSnapshot
     public IReadOnlyList<PlayerModel> PlayersForProfile(string profileId)
     {
         var ids = MembershipsForProfile(profileId).Select(x => x.PlayerId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return Players.Where(x => ids.Contains(x.Id)).ToArray();
+        if (ids.Count > 0) return Players.Where(x => ids.Contains(x.Id)).ToArray();
+
+        // Compatibility fallback for Staff snapshots that only expose the active
+        // Venue directly on the Player row. This keeps the list usable even if a
+        // deployment omits the legacy top-level player_profiles projection.
+        return Players.Where(x => string.Equals(x.ActiveProfileId, profileId, StringComparison.OrdinalIgnoreCase)).ToArray();
     }
 
     public MembershipModel? MembershipFor(string playerId, string profileId) =>
@@ -236,6 +253,33 @@ public sealed class AdminSnapshot
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var profiles = ReadArray(root, "profiles").Select(ParseProfile).Where(x => x is not null).Cast<ProfileModel>().ToArray();
+        var playerElements = ReadArray(root, "players").ToArray();
+
+        var membershipMap = new Dictionary<string, MembershipModel>(StringComparer.OrdinalIgnoreCase);
+        static string MembershipKey(string playerId, string profileId) => $"{playerId}\n{profileId}";
+        void AddMembership(JsonElement membership, string fallbackPlayerId = "")
+        {
+            var playerId = Str(membership, "player_id", fallbackPlayerId);
+            var profileId = Str(membership, "profile_id");
+            if (playerId.Length == 0 || profileId.Length == 0) return;
+            membershipMap[MembershipKey(playerId, profileId)] = new MembershipModel(
+                playerId,
+                profileId,
+                Str(membership, "current_access_code"),
+                Str(membership, "access_code_hint"),
+                Bool(membership, "is_vip"));
+        }
+
+        foreach (var membership in ReadArray(root, "player_profiles")) AddMembership(membership);
+        foreach (var player in playerElements)
+        {
+            var playerId = Str(player, "id");
+            if (!player.TryGetProperty("profile_memberships", out var nested) || nested.ValueKind != JsonValueKind.Array) continue;
+            foreach (var membership in nested.EnumerateArray())
+                if (membership.ValueKind == JsonValueKind.Object) AddMembership(membership, playerId);
+        }
+        var memberships = membershipMap.Values.ToArray();
+
         ProfileModel? active = null;
         if (root.TryGetProperty("active_profile", out var activeElement) && activeElement.ValueKind == JsonValueKind.Object)
             active = ParseProfile(activeElement);
@@ -255,7 +299,7 @@ public sealed class AdminSnapshot
             GeneratedAtUtc = DateTime.TryParse(Str(root, "generated_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var generated) ? generated : DateTime.UtcNow,
             ActiveProfile = active,
             Profiles = profiles,
-            Players = ReadArray(root, "players").Select(x => new PlayerModel(
+            Players = playerElements.Select(x => new PlayerModel(
                 Str(x, "id"),
                 Str(x, "player_name"),
                 Long(x, "gil_balance"),
@@ -265,8 +309,7 @@ public sealed class AdminSnapshot
                 Str(x, "active_profile_id"),
                 false,
                 DateUtc(x, "last_login_at"))).Where(x => x.Id.Length > 0).ToArray(),
-            Memberships = ReadArray(root, "player_profiles").Select(x => new MembershipModel(
-                Str(x, "player_id"), Str(x, "profile_id"), Str(x, "current_access_code"), Str(x, "access_code_hint"), Bool(x, "is_vip"))).Where(x => x.PlayerId.Length > 0 && x.ProfileId.Length > 0).ToArray(),
+            Memberships = memberships,
             Lootboxes = ReadArray(root, "lootboxes").Select(x => new LootboxModel(
                 Str(x, "id"), Str(x, "name"), Str(x, "profile_id"), Bool(x, "is_global"), Bool(x, "is_active", true), Bool(x, "is_card_pack"))).Where(x => x.Id.Length > 0).ToArray(),
             Rewards = ReadArray(root, "rewards").Select(x =>
@@ -284,7 +327,27 @@ public sealed class AdminSnapshot
             ProfileMinigameProfitPeriods = ReadArray(root, "_profile_minigame_profit_periods").Select(x => new ProfileMinigameProfitPeriodModel(Str(x, "profile_id"), Long(x, "minigame_loss"), Long(x, "non_venue_profit_contribution"), Long(x, "venue_profit_contribution"))).Where(x => x.ProfileId.Length > 0).ToArray(),
             SlotsJackpot = jackpot,
             BlackPrismJackpot = blackPrismJackpot,
+            DashboardSummary = ParseDashboardSummary(root),
         };
+    }
+
+
+    private static StaffDashboardSummaryModel? ParseDashboardSummary(JsonElement root)
+    {
+        if (!root.TryGetProperty("staff_dashboard_summary", out var summary) || summary.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return new StaffDashboardSummaryModel(
+            Long(summary, "players"),
+            Long(summary, "active_players"),
+            Long(summary, "lootboxes"),
+            Long(summary, "rewards"),
+            Long(summary, "cards"),
+            Long(summary, "jackpot_raised"),
+            Long(summary, "venue_card_pack_tips"),
+            Long(summary, "non_venue_card_pack_tips", Long(summary, "card_pack_tips")),
+            Long(summary, "venue_profit"),
+            Long(summary, "non_venue_profit", Long(summary, "overall_profit")));
     }
 
     private static ProfileModel? ParseProfile(JsonElement x)

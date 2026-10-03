@@ -159,7 +159,6 @@ public sealed class MainWindow : Window, IDisposable
         if (!string.IsNullOrWhiteSpace(authNotice)) ImGui.TextColored(Green, authNotice);
         if (!string.IsNullOrWhiteSpace(authError)) ImGui.TextColored(Red, authError);
         ImGui.Spacing();
-        ImGui.TextColored(Muted, "Your password is sent only to the Staff login endpoint over HTTPS and is never stored in the plugin configuration.");
     }
 
     private void DrawFirstPasswordScreen()
@@ -285,16 +284,32 @@ public sealed class MainWindow : Window, IDisposable
         var boxes = snapshot.LootboxesForProfile(active.Id);
         var boxIds = boxes.Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var rewards = snapshot.Rewards.Count(x => boxIds.Contains(x.LootboxId));
+        var summary = snapshot.DashboardSummary;
+
+        // The authenticated Staff endpoint calculates the same dashboard totals
+        // used by the website and exposes them as staff_dashboard_summary. Prefer
+        // those server-authoritative values; the legacy calculations below remain
+        // as a compatibility fallback for older deployments.
+        var dashboardPlayers = summary?.Players ?? players.Count;
+        var dashboardActivePlayers = summary?.ActivePlayers ?? players.Count(x => x.IsActive);
+        var dashboardLootboxes = summary?.Lootboxes ?? boxes.Count;
+        var dashboardRewards = summary?.Rewards ?? rewards;
+        var dashboardJackpotRaised = summary?.JackpotRaised ?? snapshot.PeriodJackpotRaisedForProfile(active.Id);
+        var dashboardVenueCardTips = summary?.VenueCardPackTips ?? snapshot.VenueCardPackTipsForProfile(active.Id);
+        var dashboardVenueProfit = summary?.VenueProfit ?? snapshot.VenueProfitForProfile(active.Id);
+        var dashboardNonVenueCardTips = summary?.NonVenueCardPackTips ?? snapshot.CardPackTipsForProfile(active.Id);
+        var dashboardNonVenueProfit = summary?.NonVenueProfit ?? snapshot.NonVenueProfitForProfile(active.Id);
+
         var metrics = new (string Name, string Value, string Note)[]
         {
-            ("Players", Format(players.Count), $"{players.Count(x => x.IsActive)} active"),
-            ("Lootboxes", Format(boxes.Count), "Visible in this Venue"),
-            ("Rewards", Format(rewards), "Configured prizes"),
-            ("Jackpot Raised", Format(snapshot.PeriodJackpotRaisedForProfile(active.Id)), "Current Save All period"),
-            ("Venue Card Pack (Tips)", Format(snapshot.VenueCardPackTipsForProfile(active.Id)), "Sales from Venue card packs"),
-            ("Venue Profit", Format(snapshot.VenueProfitForProfile(active.Id)), "Venue sales + 10% non-venue + minigame share"),
-            ("Non-Venue Card Pack (Tips)", Format(snapshot.CardPackTipsForProfile(active.Id)), "Non-Venue Card Pack Gil"),
-            ("Non-Venue Profit", Format(snapshot.NonVenueProfitForProfile(active.Id)), "Non-venue period + minigame share"),
+            ("Players", Format(dashboardPlayers), $"{Format(dashboardActivePlayers)} active"),
+            ("Lootboxes", Format(dashboardLootboxes), "Visible in this Venue"),
+            ("Rewards", Format(dashboardRewards), "Configured prizes"),
+            ("Jackpot Raised", Format(dashboardJackpotRaised), "Current Save All period"),
+            ("Venue Card Pack (Tips)", Format(dashboardVenueCardTips), "Sales from Venue card packs"),
+            ("Venue Profit", Format(dashboardVenueProfit), "Venue sales + 10% non-venue + minigame share"),
+            ("Non-Venue Card Pack (Tips)", Format(dashboardNonVenueCardTips), "Non-Venue Card Pack Gil"),
+            ("Non-Venue Profit", Format(dashboardNonVenueProfit), "Non-venue period + minigame share"),
         };
 
         const int metricColumns = 3;
