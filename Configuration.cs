@@ -10,6 +10,8 @@ public sealed class Configuration : IPluginConfiguration
     public int Version { get; set; } = 1;
     public bool OpenWindowOnLoad { get; set; } = true;
     public string LastStaffEmail { get; set; } = string.Empty;
+    public bool RememberStaffLogin { get; set; } = false;
+    public string RememberedStaffPassword { get; set; } = string.Empty;
     public string PreferredVenueId { get; set; } = string.Empty;
     public string TellTemplate { get; set; } = "Welcome to Bryer's Hideout! Your access code is {code}. Enjoy!";
     public bool ObserveTrades { get; set; } = false;

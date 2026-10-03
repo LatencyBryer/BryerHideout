@@ -27,6 +27,7 @@ public sealed class MainWindow : Window, IDisposable
     private bool authBusy;
     private string loginEmail = "";
     private string loginPassword = "";
+    private bool rememberStaffLogin;
     private string newPassword = "";
     private string confirmPassword = "";
     private string authError = "";
@@ -47,6 +48,9 @@ public sealed class MainWindow : Window, IDisposable
     {
         this.plugin = plugin;
         loginEmail = plugin.Configuration.LastStaffEmail ?? string.Empty;
+        rememberStaffLogin = plugin.Configuration.RememberStaffLogin;
+        if (rememberStaffLogin)
+            loginPassword = WindowsCredentialProtector.Unprotect(plugin.Configuration.RememberedStaffPassword);
         tellTemplateDraft = plugin.Configuration.TellTemplate;
         announcementDrafts.AddRange(plugin.Configuration.AnnouncementTemplates);
         shoutDrafts.AddRange(plugin.Configuration.ShoutTemplates);
@@ -155,6 +159,8 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.BeginDisabled(authBusy || string.IsNullOrWhiteSpace(loginEmail) || string.IsNullOrEmpty(loginPassword));
         if (ImGui.Button(authBusy ? "Signing in…" : "Sign In")) _ = LoginAsync();
         ImGui.EndDisabled();
+        ImGui.SameLine();
+        ImGui.Checkbox("Remember me", ref rememberStaffLogin);
 
         if (!string.IsNullOrWhiteSpace(authNotice)) ImGui.TextColored(Green, authNotice);
         if (!string.IsNullOrWhiteSpace(authError)) ImGui.TextColored(Red, authError);
@@ -743,10 +749,15 @@ public sealed class MainWindow : Window, IDisposable
         authBusy = true;
         authError = "";
         authNotice = "";
+        var passwordUsed = loginPassword;
         try
         {
-            var identity = await plugin.Api.LoginAsync(loginEmail.Trim(), loginPassword).ConfigureAwait(false);
+            var identity = await plugin.Api.LoginAsync(loginEmail.Trim(), passwordUsed).ConfigureAwait(false);
             plugin.Configuration.LastStaffEmail = identity.Email;
+            plugin.Configuration.RememberStaffLogin = rememberStaffLogin;
+            plugin.Configuration.RememberedStaffPassword = rememberStaffLogin
+                ? WindowsCredentialProtector.Protect(passwordUsed)
+                : string.Empty;
             if (identity.IsMaster && !string.IsNullOrWhiteSpace(plugin.Api.SelectedProfileId))
                 plugin.Configuration.PreferredVenueId = plugin.Api.SelectedProfileId;
             plugin.Configuration.Save();
@@ -777,12 +788,18 @@ public sealed class MainWindow : Window, IDisposable
         authBusy = true;
         try
         {
-            await plugin.Api.CompleteFirstPasswordAsync(newPassword).ConfigureAwait(false);
-            if (plugin.Api.Identity?.IsMaster == true && !string.IsNullOrWhiteSpace(plugin.Api.SelectedProfileId))
+            var savedNewPassword = newPassword;
+            await plugin.Api.CompleteFirstPasswordAsync(savedNewPassword).ConfigureAwait(false);
+            if (rememberStaffLogin)
             {
-                plugin.Configuration.PreferredVenueId = plugin.Api.SelectedProfileId;
-                plugin.Configuration.Save();
+                plugin.Configuration.RememberStaffLogin = true;
+                plugin.Configuration.RememberedStaffPassword = WindowsCredentialProtector.Protect(savedNewPassword);
+                if (!string.IsNullOrWhiteSpace(plugin.Api.Identity?.Email))
+                    plugin.Configuration.LastStaffEmail = plugin.Api.Identity!.Email;
             }
+            if (plugin.Api.Identity?.IsMaster == true && !string.IsNullOrWhiteSpace(plugin.Api.SelectedProfileId))
+                plugin.Configuration.PreferredVenueId = plugin.Api.SelectedProfileId;
+            plugin.Configuration.Save();
             newPassword = "";
             confirmPassword = "";
             authNotice = "Password saved. Staff access unlocked.";
@@ -799,7 +816,11 @@ public sealed class MainWindow : Window, IDisposable
         {
             await plugin.Api.LogoutAsync().ConfigureAwait(false);
             selectedPlayerId = "";
-            loginPassword = "";
+            rememberStaffLogin = plugin.Configuration.RememberStaffLogin;
+            loginEmail = plugin.Configuration.LastStaffEmail ?? string.Empty;
+            loginPassword = rememberStaffLogin
+                ? WindowsCredentialProtector.Unprotect(plugin.Configuration.RememberedStaffPassword)
+                : string.Empty;
             newPassword = "";
             confirmPassword = "";
             authError = "";
