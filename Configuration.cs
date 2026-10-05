@@ -13,7 +13,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool RememberStaffLogin { get; set; } = false;
     public string RememberedStaffPassword { get; set; } = string.Empty;
     public string PreferredVenueId { get; set; } = string.Empty;
-    public string TellTemplate { get; set; } = "Welcome to Bryer's Hideout! Your access code is {code}. Enjoy!";
+    public string TellTemplate { get; set; } = "Welcome to Bryer's Hideout! Your personal access link is {code}. Enjoy!";
     public bool ObserveTrades { get; set; } = false;
     // In-game /shout announcements are deliberately opt-in. Only the player
     // running this plugin can send them, via their own logged-in character.

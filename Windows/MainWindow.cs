@@ -37,6 +37,13 @@ public sealed class MainWindow : Window, IDisposable
     private readonly List<string> announcementDrafts = new();
     private readonly List<string> shoutDrafts = new();
 
+    private enum AccessLinkPickerAction { None, Copy, Tell, ExistingTell }
+    private AccessLinkPickerAction accessLinkPickerAction = AccessLinkPickerAction.None;
+    private bool accessLinkPickerOpenRequested;
+    private PlayerModel? accessLinkPlayer;
+    private MembershipModel? accessLinkMembership;
+    private ProfileModel? accessLinkProfile;
+
     private static readonly Vector4 Gold = new(0.88f, 0.70f, 0.32f, 1f);
     private static readonly Vector4 Green = new(0.42f, 0.82f, 0.55f, 1f);
     private static readonly Vector4 Red = new(0.95f, 0.42f, 0.42f, 1f);
@@ -140,6 +147,7 @@ public sealed class MainWindow : Window, IDisposable
         }
         ImGui.EndChild();
 
+        DrawAccessLinkPickerPopup();
         if (plugin.Api.Can("players.create")) DrawAddPlayerPopup(snapshot);
     }
 
@@ -208,7 +216,7 @@ public sealed class MainWindow : Window, IDisposable
         }
         if (plugin.Api.Can("players.view"))
         {
-            if (ImGui.Button("Send Target Code")) _ = SendTargetCodeAsync();
+            if (ImGui.Button("Send Target Code")) OpenTargetCodePicker();
             ImGui.SameLine();
         }
         if (ImGui.Button(plugin.Api.IsRefreshing ? "Refreshing…" : "Refresh")) _ = plugin.Api.RefreshAsync(true);
@@ -430,16 +438,16 @@ public sealed class MainWindow : Window, IDisposable
         if (!string.IsNullOrWhiteSpace(membership?.AccessCode))
         {
             ImGui.SameLine();
-            if (ImGui.SmallButton("Copy##code")) ImGui.SetClipboardText(membership!.AccessCode);
+            if (ImGui.SmallButton("Copy##code")) OpenAccessLinkPicker(AccessLinkPickerAction.Copy, player, membership!, active);
             ImGui.SameLine();
-            if (ImGui.SmallButton("Existing Code##code")) _ = SendExistingCodeAsync(player, membership, active);
+            if (ImGui.SmallButton("Existing Code##code")) OpenAccessLinkPicker(AccessLinkPickerAction.ExistingTell, player, membership!, active);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hit this to send a different tell to the target if it's not a New user.");
         }
 
         ImGui.Spacing();
         var primaryActions = new List<(string Label, Action Click)>();
         if (membership is not null)
-            primaryActions.Add(("Send Tell with Code", () => _ = SendTellAsync(player, membership, active)));
+            primaryActions.Add(("Send Tell with Code", () => OpenAccessLinkPicker(AccessLinkPickerAction.Tell, player, membership, active)));
         if (plugin.Api.Can("players.codes"))
             primaryActions.Add(("Regenerate Code", () => _ = RegenerateCodeAsync(player, active)));
         if (plugin.Api.Can("players.status"))
@@ -848,7 +856,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             var body = await plugin.Api.CommandAsync("create_player", new { player_name = name, profile_id = profileId });
             var code = body?["access_code"]?.GetValue<string>() ?? "";
-            notice = string.IsNullOrWhiteSpace(code) ? $"{name} created/linked." : $"{name} ready · code {code}";
+            notice = string.IsNullOrWhiteSpace(code) ? $"{name} created/linked." : $"{name} ready · personal access link available.";
             var snapshot = plugin.Api.Snapshot;
             selectedPlayerId = snapshot?.Players.FirstOrDefault(x => TargetAndTellService.NamesMatch(x.Name, name))?.Id ?? selectedPlayerId;
         });
@@ -864,7 +872,7 @@ public sealed class MainWindow : Window, IDisposable
         await CreatePlayerAsync(name, active.Id);
     }
 
-    private async Task SendTargetCodeAsync()
+    private void OpenTargetCodePicker()
     {
         var snapshot = plugin.Api.Snapshot;
         var active = snapshot?.ActiveProfile;
@@ -875,25 +883,86 @@ public sealed class MainWindow : Window, IDisposable
         if (player is null) { error = $"{name} has no access in the active Venue."; return; }
         var membership = snapshot.MembershipFor(player.Id, active.Id);
         if (membership is null) { error = "Player membership is missing."; return; }
-        await SendTellAsync(player, membership, active);
+        OpenAccessLinkPicker(AccessLinkPickerAction.Tell, player, membership, active);
     }
 
-    private async Task SendTellAsync(PlayerModel player, MembershipModel membership, ProfileModel active)
+    private void OpenAccessLinkPicker(AccessLinkPickerAction action, PlayerModel player, MembershipModel membership, ProfileModel profile)
+    {
+        if (string.IsNullOrWhiteSpace(membership.AccessCode))
+        {
+            error = "This Player does not currently have an access code for the active Venue.";
+            return;
+        }
+        accessLinkPickerAction = action;
+        accessLinkPlayer = player;
+        accessLinkMembership = membership;
+        accessLinkProfile = profile;
+        accessLinkPickerOpenRequested = true;
+    }
+
+    private void DrawAccessLinkPickerPopup()
+    {
+        // Open the popup from the same root ID stack where BeginPopup runs. The
+        // buttons that request it live inside tabs/child windows, and opening it
+        // from those nested stacks can produce a different ImGui popup ID.
+        if (accessLinkPickerOpenRequested)
+        {
+            accessLinkPickerOpenRequested = false;
+            ImGui.OpenPopup("Choose Access Link##access-link-picker");
+        }
+        if (!ImGui.BeginPopup("Choose Access Link##access-link-picker")) return;
+        ImGui.TextColored(Gold, "Choose destination");
+        ImGui.TextColored(Muted, accessLinkPickerAction == AccessLinkPickerAction.Copy ? "Copy a personal link:" : "Send a personal link:");
+        ImGui.Separator();
+
+        foreach (var destination in AccessLinkBuilder.Destinations)
+        {
+            if (!ImGui.Selectable(destination.Label)) continue;
+            var player = accessLinkPlayer;
+            var membership = accessLinkMembership;
+            var profile = accessLinkProfile;
+            var action = accessLinkPickerAction;
+            ImGui.CloseCurrentPopup();
+            if (player is null || membership is null || profile is null) break;
+            var link = AccessLinkBuilder.Build(membership.AccessCode, destination);
+            if (action == AccessLinkPickerAction.Copy)
+            {
+                ImGui.SetClipboardText(link);
+                notice = $"{destination.Label} link copied for {player.Name}.";
+            }
+            else if (action == AccessLinkPickerAction.ExistingTell)
+            {
+                _ = SendExistingCodeAsync(player, membership, profile, link);
+            }
+            else
+            {
+                _ = SendTellAsync(player, membership, profile, link);
+            }
+            accessLinkPickerAction = AccessLinkPickerAction.None;
+            accessLinkPlayer = null;
+            accessLinkMembership = null;
+            accessLinkProfile = null;
+            break;
+        }
+        ImGui.EndPopup();
+    }
+
+    private async Task SendTellAsync(PlayerModel player, MembershipModel membership, ProfileModel active, string accessLink)
     {
         await GuardedAsync(() =>
         {
-            plugin.TargetAndTell.SendCodeToCurrentTarget(player, membership, active, plugin.Configuration.TellTemplate);
-            notice = $"Tell sent to {player.Name}.";
+            plugin.TargetAndTell.SendCodeToCurrentTarget(player, membership, active, plugin.Configuration.TellTemplate, accessLink);
+            notice = $"Access link sent to {player.Name}.";
             return Task.CompletedTask;
         });
     }
 
-    private async Task SendExistingCodeAsync(PlayerModel player, MembershipModel membership, ProfileModel active)
+    private async Task SendExistingCodeAsync(PlayerModel player, MembershipModel membership, ProfileModel active, string accessLink)
     {
         await GuardedAsync(() =>
         {
-            plugin.TargetAndTell.SendCodeToCurrentTarget(player, membership, active, "{code} -> https://bit.ly/lootboxs Happy to see you again!");
-            notice = $"Existing code sent to {player.Name}.";
+            plugin.TargetAndTell.SendCodeToCurrentTarget(player, membership, active, "{code} Happy to see you again!", accessLink);
+            notice = $"Existing access link sent to {player.Name}.";
             return Task.CompletedTask;
         });
     }
@@ -904,7 +973,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             var body = await plugin.Api.CommandAsync("regenerate_code", new { player_id = player.Id, profile_id = active.Id });
             var code = body?["access_code"]?.GetValue<string>() ?? "";
-            notice = string.IsNullOrWhiteSpace(code) ? "Access code regenerated." : $"New code: {code}";
+            notice = string.IsNullOrWhiteSpace(code) ? "Access code regenerated." : "Access code regenerated · new personal links are ready.";
         });
     }
 

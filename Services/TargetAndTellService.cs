@@ -32,7 +32,7 @@ public sealed class TargetAndTellService
         return name.Length == 0 ? null : name;
     }
 
-    public void SendCodeToCurrentTarget(PlayerModel player, MembershipModel membership, ProfileModel profile, string template)
+    public void SendCodeToCurrentTarget(PlayerModel player, MembershipModel membership, ProfileModel profile, string template, string? accessValue = null)
     {
         var target = targets.Target as IPlayerCharacter
             ?? throw new InvalidOperationException("Target a player character first.");
@@ -55,7 +55,7 @@ public sealed class TargetAndTellService
         if (text.Length == 0)
             throw new InvalidOperationException("The Tell template is empty.");
 
-        text = text.Replace("{code}", membership.AccessCode, StringComparison.OrdinalIgnoreCase)
+        text = text.Replace("{code}", string.IsNullOrWhiteSpace(accessValue) ? membership.AccessCode : accessValue, StringComparison.OrdinalIgnoreCase)
                    .Replace("{player}", player.Name, StringComparison.OrdinalIgnoreCase)
                    .Replace("{venue}", profile.Name, StringComparison.OrdinalIgnoreCase)
                    .Replace('\r', ' ')
